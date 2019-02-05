@@ -34,10 +34,6 @@ import * as tunneling from "tunnel";
 import * as WebSocket from "ws";
 import { machine } from "./lib/machine/machine";
 
-function getProxyConfig(): tunneling.HttpsOverHttpOptions["proxy"] {
-    return configurationValue<tunneling.HttpsOverHttpOptions["proxy"]>("sdm.proxy");
-};
-
 const machineOptions: ConfigureOptions = {
     requiredConfigurationValues: [],
 };
@@ -51,7 +47,7 @@ class ProxyAxiosHttpClientFactory implements HttpClientFactory {
 
 function createAxiosRequestConfig(config: AxiosRequestConfig): AxiosRequestConfig {
     const tunnel = tunneling.httpsOverHttp({
-        proxy: getProxyConfig(),
+        proxy: configurationValue<tunneling.HttpsOverHttpOptions["proxy"]>("sdm.proxy"),
     });
 
     return {
@@ -72,7 +68,7 @@ class ProxyWSWebSocketFactory extends WSWebSocketFactory {
 
     protected configureOptions(options: WebSocket.ClientOptions): WebSocket.ClientOptions {
         const tunnel = tunneling.httpsOverHttp({
-            proxy: getProxyConfig(),
+            proxy: configurationValue<tunneling.HttpsOverHttpOptions["proxy"]>("sdm.proxy"),
         });
 
         return {
