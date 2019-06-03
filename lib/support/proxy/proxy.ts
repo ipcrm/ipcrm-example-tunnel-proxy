@@ -18,13 +18,12 @@ import {
     ApolloGraphClientFactory,
     AxiosHttpClient,
     Configuration,
-    configurationValue, DefaultHttpClientOptions, doWithRetry,
+    configurationValue,
     HttpClient,
-    HttpClientFactory, HttpClientOptions, HttpResponse,
+    HttpClientFactory,
     logger,
     WSWebSocketFactory,
 } from "@atomist/automation-client";
-import {configureProxy} from "@atomist/automation-client/lib/internal/util/http";
 /* tslint:disable:import-blacklist */
 import axios, {AxiosRequestConfig} from "axios";
 // @ts-ignore
