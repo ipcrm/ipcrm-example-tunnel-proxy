@@ -18,12 +18,13 @@ import {
     ApolloGraphClientFactory,
     AxiosHttpClient,
     Configuration,
-    configurationValue,
+    configurationValue, DefaultHttpClientOptions, doWithRetry,
     HttpClient,
-    HttpClientFactory,
+    HttpClientFactory, HttpClientOptions, HttpResponse,
     logger,
     WSWebSocketFactory,
 } from "@atomist/automation-client";
+import {configureProxy} from "@atomist/automation-client/lib/internal/util/http";
 /* tslint:disable:import-blacklist */
 import axios, {AxiosRequestConfig} from "axios";
 // @ts-ignore
@@ -45,10 +46,18 @@ export const configureClientFactories = async (config: Configuration) => {
 };
 
 export function isProxySet(): boolean {
-    return (
-        process.env.hasOwnProperty("https_proxy") ||
-        process.env.hasOwnProperty("HTTPS_PROXY")
-    );
+    let proxyString: string;
+    if (process.env.hasOwnProperty("https_proxy")) {
+        proxyString = process.env.https_proxy;
+    } else if (process.env.hasOwnProperty("HTTPS_PROXY")) {
+        proxyString = process.env.HTTPS_PROXY;
+    }
+
+    if (!!proxyString && !proxyString.toLowerCase().startsWith("http")) {
+        throw new Error("Supplied proxy string must include protocol!  Include http:// or https://");
+    }
+
+    return !!proxyString;
 }
 
 export function isProxyTunneling(): boolean {
@@ -70,7 +79,6 @@ export function parseProxyDetails(): RegExpExecArray {
     return parseProxy.exec(
         process.env.hasOwnProperty("https_proxy") ? process.env.https_proxy : process.env.HTTPS_PROXY,
     );
-
 }
 
 export function buildProxyConfig(): tunneling.ProxyOptions {
@@ -100,7 +108,35 @@ export function buildProxyConfig(): tunneling.ProxyOptions {
 
 export class ProxyAxiosHttpClientFactory implements HttpClientFactory {
     public create(url?: string): HttpClient {
-        return new ProxyAxiosHttpClient();
+        // Build a list of entries in no_proxy or NO_PROXY
+        const noProxyRawList: string[] = [];
+        if (process.env.hasOwnProperty("no_proxy")) {
+            noProxyRawList.push(...process.env.no_proxy.split(","));
+        }
+
+        if (process.env.hasOwnProperty("NO_PROXY")) {
+            noProxyRawList.push(...process.env.no_proxy.split(","));
+        }
+
+        // Unique and lower case list of no_proxy'd hosts
+        const noProxyList = [...new Set(noProxyRawList.map(p => p.toLowerCase()))];
+        logger.debug(`ProxyAxiosHttpClientFactory: NoProxyList => ${JSON.stringify(noProxyList)}`);
+
+        // For each member of the no_proxy list, determine if our url includes the member and set found to true if it does
+        let found: boolean;
+        noProxyList.forEach(npl => {
+            if (url.toLowerCase().includes(npl)) {
+                found = true;
+            }
+        });
+
+        // For found urls, return a standard AxiosHttpClient which will bypass the proxy
+        if (found) {
+            logger.debug(`ProxyAxiosHttpClientFactory: Found no-proxy url, bypassing proxy`);
+            return new AxiosHttpClientNoProxy();
+        } else {
+            return new ProxyAxiosHttpClient();
+        }
     }
 }
 
@@ -115,6 +151,15 @@ export function createAxiosRequestConfig(config: AxiosRequestConfig): AxiosReque
         httpsAgent: tunnel,
         proxy: false,
     };
+}
+
+export class AxiosHttpClientNoProxy extends AxiosHttpClient {
+    protected configureOptions(config: AxiosRequestConfig): AxiosRequestConfig {
+        return {
+            ...config,
+            proxy: false,
+        };
+    }
 }
 
 export class ProxyAxiosHttpClient extends AxiosHttpClient {

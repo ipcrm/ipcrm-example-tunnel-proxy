@@ -51,7 +51,7 @@ export const configuration: Configuration = {
          * Click into the first argument (the "machine" function) to personalize
          * your SDM.
          */
-        configureSdm(machine, machineOptions),
         configureClientFactories,
+        configureSdm(machine, machineOptions),
     ],
 };
