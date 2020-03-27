@@ -15,7 +15,7 @@
  */
 
 import {
-    ApolloGraphClientFactory,
+    ApolloGraphClientFactory, AutomationClient,
     AxiosHttpClient,
     Configuration,
     configurationValue,
@@ -24,6 +24,8 @@ import {
     logger,
     WSWebSocketFactory,
 } from "@atomist/automation-client";
+import {SoftwareDeliveryMachineConfiguration} from "@atomist/sdm";
+import {Config} from "@atomist/sdm-local/lib/cli/invocation/command/generator/PackageJson";
 /* tslint:disable:import-blacklist */
 import axios, {AxiosRequestConfig} from "axios";
 // @ts-ignore
@@ -31,8 +33,9 @@ import { buildAxiosFetch } from "axios-fetch";
 import * as tunneling from "tunnel";
 import * as WebSocket from "ws";
 
-export const configureClientFactories = async (config: Configuration) => {
-    if (isProxySet() && isProxyTunneling()) {
+export const configureClientFactories = async (config: any) => {
+    const proxy = isProxySet(config as unknown as Configuration & SoftwareDeliveryMachineConfiguration);
+    if (proxy && isProxyTunneling(proxy)) {
         if (process.env.AXIOS_VERBOSE === "true") {
             config.http.client.factory = new LoggingAxiosHttpClientFactory();
         } else {
@@ -44,26 +47,25 @@ export const configureClientFactories = async (config: Configuration) => {
     return config;
 };
 
-export function isProxySet(): boolean {
+export function isProxySet(config: Configuration & SoftwareDeliveryMachineConfiguration): string {
     let proxyString: string;
-    if (process.env.hasOwnProperty("https_proxy")) {
-        proxyString = process.env.https_proxy;
+    if (process.env.hasOwnProperty("https_proxy") || config.sdm.proxy.host) {
+        proxyString = process.env.https_proxy || `${config.sdm.proxy.protocol}://${config.sdm.proxy.host}:${config.sdm.proxy.port}`;
     } else if (process.env.hasOwnProperty("HTTPS_PROXY")) {
-        proxyString = process.env.HTTPS_PROXY;
+        proxyString = process.env.HTTPS_PROXY || `${config.sdm.proxy.protocol}://${config.sdm.proxy.host}:${config.sdm.proxy.port}`;
     }
 
     if (!!proxyString && !proxyString.toLowerCase().startsWith("http")) {
         throw new Error("Supplied proxy string must include protocol!  Include http:// or https://");
     }
-
-    return !!proxyString;
+    return proxyString;
 }
 
-export function isProxyTunneling(): boolean {
-    return parseProxyDetails()[1].toLowerCase() === "http";
+export function isProxyTunneling(proxy: string): boolean {
+    return parseProxyDetails(proxy)[2].toLowerCase() === "http";
 }
 
-export function parseProxyDetails(): RegExpExecArray {
+export function parseProxyDetails(proxy: string): RegExpExecArray {
     /**
      * Match groups
      * 1 - protocol (http/https)
@@ -74,31 +76,30 @@ export function parseProxyDetails(): RegExpExecArray {
      * 6 - :port
      * 7 - port
      */
-    const parseProxy = /^(https?):\/\/(([^:]{1,128}):([^@]{1,256})@)?([^:\/]{1,255})(:([0-9]{1,5}))?\/?/;
-    return parseProxy.exec(
-        process.env.hasOwnProperty("https_proxy") ? process.env.https_proxy : process.env.HTTPS_PROXY,
-    );
+    const parseProxy = /^((https?):\/\/)?(([^:]{1,128}):([^@]{1,256})@)?([^:\/]{1,255})(:([0-9]{1,5}))?\/?/;
+    return parseProxy.exec(proxy);
 }
 
-export function buildProxyConfig(): tunneling.ProxyOptions {
+export function buildProxyConfig(config: Configuration & SoftwareDeliveryMachineConfiguration): tunneling.ProxyOptions {
     logger.debug(`Tunneling Proxy detected, configuring`);
-    const proxy = parseProxyDetails();
+    const proxy = parseProxyDetails(isProxySet(config));
+
     let proxyDetails: tunneling.ProxyOptions = {
-        host: proxy[5],
+        host: proxy[6],
         headers: undefined,
     };
 
     if (proxy[7]) {
         proxyDetails = {
             ...proxyDetails,
-            port: parseInt(proxy[7], undefined),
+            port: parseInt(proxy[8], undefined),
         };
     }
 
     if (proxy[3] && proxy[4]) {
         proxyDetails = {
             ...proxyDetails,
-            proxyAuth: `${proxy[3]}:${proxy[4]}`,
+            proxyAuth: `${proxy[4]}:${proxy[5]}`,
         };
     }
 
@@ -140,7 +141,7 @@ export class ProxyAxiosHttpClientFactory implements HttpClientFactory {
 }
 
 export function createAxiosRequestConfig(config: AxiosRequestConfig): AxiosRequestConfig {
-    const proxy = configurationValue<tunneling.ProxyOptions>("sdm.proxy", buildProxyConfig());
+    const proxy = buildProxyConfig(configurationValue());
     const tunnel = tunneling.httpsOverHttp({
         proxy,
     });
@@ -162,7 +163,6 @@ export class AxiosHttpClientNoProxy extends AxiosHttpClient {
 }
 
 export class ProxyAxiosHttpClient extends AxiosHttpClient {
-
     protected configureOptions(config: AxiosRequestConfig): AxiosRequestConfig {
         return createAxiosRequestConfig(config);
     }
@@ -171,7 +171,7 @@ export class ProxyAxiosHttpClient extends AxiosHttpClient {
 export class ProxyWSWebSocketFactory extends WSWebSocketFactory {
 
     protected configureOptions(options: WebSocket.ClientOptions): WebSocket.ClientOptions {
-        const proxy = configurationValue<tunneling.ProxyOptions>("sdm.proxy", buildProxyConfig());
+        const proxy = buildProxyConfig(configurationValue());
         const tunnel = tunneling.httpsOverHttp({
             proxy,
         });
@@ -184,8 +184,7 @@ export class ProxyWSWebSocketFactory extends WSWebSocketFactory {
 }
 
 export class ProxyApolloGraphClientFactory extends ApolloGraphClientFactory {
-
-    protected configure(config: Configuration): GlobalFetch["fetch"] {
+    protected configure(config: Configuration): WindowOrWorkerGlobalScope["fetch"] {
         return buildAxiosFetch(axios.create(createAxiosRequestConfig({})));
     }
 }

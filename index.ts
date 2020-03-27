@@ -14,35 +14,43 @@
  * limitations under the License.
  */
 
-import {
-    Configuration,
-} from "@atomist/automation-client";
-import {
-    ConfigureOptions,
-    configureSdm,
-} from "@atomist/sdm-core";
-import { machine } from "./lib/machine/machine";
-import {getProgressLog} from "./lib/support/proxy/progressLog";
-import {
-    configureClientFactories,
-} from "./lib/support/proxy/proxy";
-
-const machineOptions: ConfigureOptions = {
-    /**
-     * When your SDM requires configuration that is unique to it,
-     * you can list it here.
-     */
-    requiredConfigurationValues: [
-    ],
-};
+import {filesChangedSince, goal, GoalInvocation, PushListenerInvocation, pushTest, whenPushSatisfies} from "@atomist/sdm";
+import {configure, configureSdm} from "@atomist/sdm-core";
+import {configureClientFactories, ProxyAxiosHttpClientFactory} from "./lib/support/proxy/proxy";
 
 /**
- * The starting point for building an SDM is here!
+ * The main entry point into the SDM
  */
-export const configuration: Configuration = {
-    sdm: {
-        logFactory: getProgressLog(),
-    },
+export const configuration = configure<{}>(async sdm => {
+    const messageGoal = goal(
+        {
+            displayName: "Print a message",
+        },
+        async (goalInvocation: GoalInvocation) => {
+            await goalInvocation.addressChannels("Way to update the README! 😍");
+        });
+
+    const modifiesReadme = pushTest(
+        "modifiesReadme",
+        async (pushListenerInvocation: PushListenerInvocation) => {
+            const changedFiles = await filesChangedSince(pushListenerInvocation.project, pushListenerInvocation.push);
+            if (changedFiles) {
+                return changedFiles.includes("README.md");
+            }
+            return false;
+        });
+
+    sdm.withPushRules(
+        whenPushSatisfies(modifiesReadme)
+            .setGoals(messageGoal),
+    );
+}, {
+    preProcessors: [
+        async cfg => {
+            cfg.http.client.factory = new ProxyAxiosHttpClientFactory();
+            return cfg;
+        },
+    ],
     postProcessors: [
         /**
          * This is important setup! This defines the function that will be called
@@ -52,6 +60,5 @@ export const configuration: Configuration = {
          * your SDM.
          */
         configureClientFactories,
-        configureSdm(machine, machineOptions),
     ],
-};
+});

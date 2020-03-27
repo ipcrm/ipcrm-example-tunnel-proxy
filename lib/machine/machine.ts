@@ -14,7 +14,9 @@
  * limitations under the License.
  */
 
+import {logger} from "@atomist/automation-client";
 import {
+    goal, onAnyPush,
     SoftwareDeliveryMachine,
     SoftwareDeliveryMachineConfiguration,
 } from "@atomist/sdm";
@@ -35,6 +37,12 @@ export function machine(
         name: "Empty Seed Software Delivery Machine",
         configuration,
     });
+
+    const mygoal = goal({uniqueName: "new"}, async gi => {
+        logger.debug("hooray");
+    });
+
+    sdm.withPushRules(onAnyPush().setGoals(mygoal));
 
     /*
      * this is a good place to type
